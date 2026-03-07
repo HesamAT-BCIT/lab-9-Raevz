@@ -1,18 +1,212 @@
-<!DOCTYPE html>
-<html>
-
+<!doctype html>
+<html lang="en">
 <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Dashboard</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 2rem;
+            background: #f7f7f7;
+            color: #222;
+        }
+
+        .page {
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+
+        .topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+        }
+
+        .actions {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+            .actions a {
+                text-decoration: none;
+                padding: 0.65rem 1rem;
+                border-radius: 8px;
+                background: #1f2937;
+                color: white;
+            }
+
+        .chart-card {
+            background: white;
+            border-radius: 12px;
+            padding: 1rem;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+        }
+
+        .chart-container {
+            position: relative;
+            width: 100%;
+            min-height: 420px;
+        }
+
+        .status {
+            margin-top: 0.75rem;
+            color: #555;
+            font-size: 0.95rem;
+        }
+    </style>
 </head>
-
 <body>
-    <h1>Welcome, {{ first_name }}</h1>
-    <p>Use the navigation below to manage your profile.</p>
+    <div class="page">
+        <div class="topbar">
+            <div>
+                <h1>Welcome{% if first_name %}, {{ first_name }}{% endif %}</h1>
+                <p>Live sensor dashboard with HTTP polling every 5 seconds.</p>
+            </div>
 
-    <ul>
-        <li><a href="{{ url_for('profile') }}">Create/Update Profile</a></li>
-        <li><a href="{{ url_for('logout') }}">Logout</a></li>
-    </ul>
+            <div class="actions">
+                <a href="{{ url_for('profile.profile') }}">Create/Update Profile</a>
+                <a href="{{ url_for('auth.logout') }}">Logout</a>
+            </div>
+        </div>
+
+        <div class="chart-card">
+            <h2>Sensor Telemetry</h2>
+
+            <div class="chart-container">
+                <canvas id="sensorChart"></canvas>
+            </div>
+
+            <div id="chartStatus" class="status">Loading sensor data...</div>
+        </div>
+    </div>
+
+    <script>
+        // JWT passed in from Flask
+        const token = {{ jwt_token|tojson }};
+
+        const statusEl = document.getElementById("chartStatus");
+        const ctx = document.getElementById("sensorChart").getContext("2d");
+
+        // Create chart ONCE
+        const sensorChart = new Chart(ctx, {
+            type: "line",
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: "Temperature (deg C)",
+                        data: [],
+                        yAxisID: "y",
+                        tension: 0.25,
+                        borderWidth: 2,
+                        pointRadius: 2
+                    },
+                    {
+                        label: "Humidity (%)",
+                        data: [],
+                        yAxisID: "y1",
+                        tension: 0.25,
+                        borderWidth: 2,
+                        pointRadius: 2
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: "index",
+                    intersect: false
+                },
+                plugins: {
+                    tooltip: {
+                        enabled: true
+                    }
+                },
+                scales: {
+                    x: {
+                        title: {
+                            display: true,
+                            text: "Timestamp"
+                        }
+                    },
+                    y: {
+                        type: "linear",
+                        position: "left",
+                        title: {
+                            display: true,
+                            text: "Temperature (degC)"
+                        }
+                    },
+                    y1: {
+                        type: "linear",
+                        position: "right",
+                        title: {
+                            display: true,
+                            text: "Humidity (%)"
+                        },
+                        grid: {
+                            drawOnChartArea: false
+                        }
+                    }
+                }
+            }
+        });
+
+        function formatTimestamp(isoString) {
+            const date = new Date(isoString);
+            return date.toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit"
+            });
+        }
+
+        async function updateChart() {
+            try {
+                const response = await fetch("/api/sensor_data", {
+                    method: "GET",
+                    headers: {
+                        "Authorization": `Bearer ${token}`
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Request failed with status ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                const labels = data.map(point => formatTimestamp(point.timestamp));
+                const temperatures = data.map(point => point.temperature);
+                const humidities = data.map(point => point.humidity);
+
+                // Update existing chart data
+                sensorChart.data.labels = labels;
+                sensorChart.data.datasets[0].data = temperatures;
+                sensorChart.data.datasets[1].data = humidities;
+                sensorChart.update();
+
+                statusEl.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+            } catch (error) {
+                console.error(error);
+                statusEl.textContent = `Chart update failed: ${error.message}`;
+            }
+        }
+
+        // Initial fetch
+        updateChart();
+
+        // Poll every 5 seconds
+        setInterval(updateChart, 5000);
+    </script>
 </body>
-
 </html>
